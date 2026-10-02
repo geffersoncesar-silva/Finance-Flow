@@ -93,6 +93,31 @@ describe('finance utilities', () => {
     })
   })
 
+  it('does not regenerate a deleted future occurrence of a recurring transaction', () => {
+    const recurring = {
+      ...sampleTransactions[0],
+      id: 'recurring-base',
+      date: '2026-09-01',
+      recurring: 'monthly' as const,
+      status: 'paid' as const,
+    }
+    const deletedOccurrence: Transaction = {
+      ...recurring,
+      id: 'recurring:recurring-base:1',
+      date: '2026-10-01',
+      recurring: 'none',
+      recurrenceParentId: recurring.id,
+      isDeleted: true,
+    }
+
+    const expanded = expandRecurringTransactions([recurring, deletedOccurrence], 2)
+
+    expect(expanded.map((item) => item.id)).toEqual([
+      'recurring-base',
+      'recurring:recurring-base:2',
+    ])
+  })
+
   it('generates monthly installments with a shared group id', () => {
     const installments = expandInstallments({
       ...sampleTransactions[1],

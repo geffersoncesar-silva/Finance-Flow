@@ -35,7 +35,7 @@ export const expandRecurringTransactions = (transactions: Transaction[], occurre
   const generated: Transaction[] = []
 
   transactions.forEach((transaction) => {
-    if (transaction.recurring === 'none' || transaction.recurrenceParentId || transaction.status === 'cancelled') return
+    if (transaction.isDeleted || transaction.recurring === 'none' || transaction.recurrenceParentId || transaction.status === 'cancelled') return
 
     for (let occurrence = 1; occurrence <= occurrences; occurrence += 1) {
       generated.push({
@@ -49,7 +49,10 @@ export const expandRecurringTransactions = (transactions: Transaction[], occurre
   })
 
   const existingIds = new Set(transactions.map((transaction) => transaction.id))
-  return [...transactions, ...generated.filter((transaction) => !existingIds.has(transaction.id))]
+  return [
+    ...transactions.filter((transaction) => !transaction.isDeleted),
+    ...generated.filter((transaction) => !existingIds.has(transaction.id)),
+  ]
 }
 
 export const expandInstallments = (data: TransactionInput): TransactionInput[] => {

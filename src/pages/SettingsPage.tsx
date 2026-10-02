@@ -1,12 +1,23 @@
 import { Download, Trash2, Bell, Globe, DollarSign, Moon } from 'lucide-react'
-import { useAuth } from '../contexts/AuthContext'
 import { useFinance } from '../contexts/FinanceContext'
 import { getText } from '../i18n'
 
 export function SettingsPage() {
-  const { theme, setTheme, currency, setCurrency, language, setLanguage } = useFinance()
-  const { user } = useAuth()
-  const financeStorageKey = `finance-context-v1:${user?.id ?? 'unknown'}`
+  const {
+    theme,
+    setTheme,
+    currency,
+    setCurrency,
+    language,
+    setLanguage,
+    transactions,
+    categories,
+    accounts,
+    creditCards,
+    goals,
+    replaceFinanceData,
+    clearFinanceData,
+  } = useFinance()
   const t = (key: keyof typeof import('../i18n').appText['pt-BR']) => getText(language, key)
   const currencies = [
     { value: 'BRL', label: t('currencyBRL') },
@@ -25,7 +36,7 @@ export function SettingsPage() {
       theme: localStorage.getItem('finance-theme'),
       currency: localStorage.getItem('finance-currency'),
       language: localStorage.getItem('finance-language'),
-      financeData: localStorage.getItem(financeStorageKey),
+      financeData: { transactions, categories, accounts, creditCards, goals },
     }
 
     const dataStr = JSON.stringify(data, null, 2)
@@ -38,14 +49,17 @@ export function SettingsPage() {
     URL.revokeObjectURL(url)
   }
 
-  const handleClearData = () => {
+  const handleClearData = async () => {
     const confirmed = window.confirm(
       t('confirmClearData'),
     )
     if (!confirmed) return
 
-    localStorage.removeItem(financeStorageKey)
-    window.location.reload()
+    try {
+      await clearFinanceData()
+    } catch {
+      alert(t('dataOperationError'))
+    }
   }
 
   const handleImportData = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -54,16 +68,26 @@ export function SettingsPage() {
 
     try {
       const text = await file.text()
-      const data = JSON.parse(text)
+      const data = JSON.parse(text) as { financeData?: unknown }
 
       if (data.financeData) {
-        localStorage.setItem(financeStorageKey, data.financeData)
-        window.location.reload()
+        const snapshot = typeof data.financeData === 'string'
+          ? JSON.parse(data.financeData)
+          : data.financeData
+        if (!snapshot || typeof snapshot !== 'object') throw new Error('Invalid finance data')
+        const records = snapshot as Record<string, unknown>
+        await replaceFinanceData({
+          transactions: Array.isArray(records.transactions) ? records.transactions : [],
+          categories: Array.isArray(records.categories) ? records.categories : [],
+          accounts: Array.isArray(records.accounts) ? records.accounts : [],
+          creditCards: Array.isArray(records.creditCards) ? records.creditCards : [],
+          goals: Array.isArray(records.goals) ? records.goals : [],
+        })
       } else {
         alert(t('invalidFileFormat'))
       }
     } catch {
-      alert(t('importError'))
+      alert(t('dataOperationError'))
     }
   }
 

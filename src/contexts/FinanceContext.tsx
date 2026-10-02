@@ -6,7 +6,7 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import { financeService } from '../services/financeService'
+import { financeService, type FinanceSnapshot } from '../services/financeService'
 import { expandInstallments, expandRecurringTransactions } from '../utils/finance'
 import type {
   Account,
@@ -26,6 +26,11 @@ interface FinanceContextValue {
   accounts: Account[]
   creditCards: CreditCard[]
   goals: Goal[]
+  isLoading: boolean
+  loadError: string | null
+  reloadData: () => void
+  replaceFinanceData: (snapshot: FinanceSnapshot) => Promise<void>
+  clearFinanceData: () => Promise<void>
   theme: ThemeMode
   setTheme: (theme: ThemeMode) => void
   currency: CurrencyCode
@@ -90,48 +95,45 @@ export function FinanceProvider({ children, userId }: { children: ReactNode; use
   const [currency, setCurrency] = useState<CurrencyCode>(getInitialCurrency)
   const [language, setLanguage] = useState<LanguageCode>(getInitialLanguage)
   const [dataLoaded, setDataLoaded] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [reloadKey, setReloadKey] = useState(0)
 
   useEffect(() => {
     let active = true
 
     const loadData = async () => {
-      const userStorageKey = `${STORAGE_KEY}:${userId}`
-      let storedData = localStorage.getItem(userStorageKey)
+      setIsLoading(true)
+      setLoadError(null)
 
-      if (!storedData) {
-        const legacyData = localStorage.getItem(STORAGE_KEY)
-        if (legacyData) {
-          localStorage.setItem(userStorageKey, legacyData)
-          localStorage.removeItem(STORAGE_KEY)
-          storedData = legacyData
+      try {
+        const userStorageKey = `${STORAGE_KEY}:${userId}`
+        let storedData = localStorage.getItem(userStorageKey)
+
+        if (!storedData) {
+          storedData = localStorage.getItem(STORAGE_KEY)
         }
-      }
 
-      if (storedData) {
-        const parsed = JSON.parse(storedData) as Partial<{
-          transactions: Transaction[]
-          categories: Category[]
-          accounts: Account[]
-          creditCards: CreditCard[]
-          goals: Goal[]
-        }>
+        const localSnapshot = storedData
+          ? JSON.parse(storedData) as Partial<FinanceSnapshot>
+          : undefined
+        const data = await financeService.loadFinanceData(userId, localSnapshot)
         if (!active) return
-        setTransactions(expandRecurringTransactions(parsed.transactions ?? []))
-        setCategories(parsed.categories ?? [])
-        setAccounts(parsed.accounts ?? [])
-        setCreditCards(parsed.creditCards ?? [])
-        setGoals(parsed.goals ?? [])
-      } else {
-        const categoryData = await financeService.getCategories()
-        if (!active) return
-        setTransactions([])
-        setCategories(categoryData)
-        setAccounts([])
-        setCreditCards([])
-        setGoals([])
-      }
 
-      if (active) setDataLoaded(true)
+        setTransactions(expandRecurringTransactions(data.transactions))
+        setCategories(data.categories)
+        setAccounts(data.accounts)
+        setCreditCards(data.creditCards)
+        setGoals(data.goals)
+        setDataLoaded(true)
+        setIsLoading(false)
+        localStorage.removeItem(STORAGE_KEY)
+      } catch (error) {
+        if (!active) return
+        setLoadError(error instanceof Error ? error.message : 'Could not load your financial data.')
+        setDataLoaded(false)
+        setIsLoading(false)
+      }
     }
 
     void loadData()
@@ -139,7 +141,7 @@ export function FinanceProvider({ children, userId }: { children: ReactNode; use
     return () => {
       active = false
     }
-  }, [userId])
+  }, [userId, reloadKey])
 
   useEffect(() => {
     localStorage.setItem('finance-theme', theme)
@@ -167,6 +169,26 @@ export function FinanceProvider({ children, userId }: { children: ReactNode; use
     accounts,
     creditCards,
     goals,
+    isLoading,
+    loadError,
+    reloadData: () => setReloadKey((current) => current + 1),
+    replaceFinanceData: async (snapshot) => {
+      const next = await financeService.replaceFinanceData(userId, snapshot)
+      setTransactions(expandRecurringTransactions(next.transactions))
+      setCategories(next.categories)
+      setAccounts(next.accounts)
+      setCreditCards(next.creditCards)
+      setGoals(next.goals)
+    },
+    clearFinanceData: async () => {
+      await financeService.clearFinanceData(userId)
+      const next = await financeService.loadFinanceData(userId)
+      setTransactions(expandRecurringTransactions(next.transactions))
+      setCategories(next.categories)
+      setAccounts(next.accounts)
+      setCreditCards(next.creditCards)
+      setGoals(next.goals)
+    },
     theme,
     setTheme,
     currency,
@@ -175,19 +197,25 @@ export function FinanceProvider({ children, userId }: { children: ReactNode; use
     setLanguage,
     addTransaction: async (data) => {
       const inputs = expandInstallments(data)
-      const createdTransactions = await Promise.all(inputs.map((input) => financeService.createTransaction(input)))
+      const createdTransactions = await financeService.createTransactions(userId, inputs)
       setTransactions((current) => [...createdTransactions, ...current])
       return createdTransactions[0]
     },
     updateTransaction: async (id, data) => {
-      const updated = await financeService.updateTransaction(id, data)
+      const current = transactions.find((item) => item.id === id)
+      const payload = current?.recurrenceParentId
+        ? { ...data, recurring: 'none' as const, recurrenceParentId: current.recurrenceParentId }
+        : data
+      const updated = await financeService.updateTransaction(userId, id, payload)
       setTransactions((current) =>
         current.map((transaction) => (transaction.id === id ? { ...transaction, ...updated } : transaction)),
       )
       return updated
     },
     deleteTransaction: async (id) => {
-      await financeService.deleteTransaction(id)
+      const transaction = transactions.find((item) => item.id === id)
+      if (!transaction) return
+      await financeService.deleteTransaction(userId, transaction)
       setTransactions((current) => current.filter((transaction) => transaction.id !== id))
     },
     addCategory: async (category) => {
@@ -195,15 +223,18 @@ export function FinanceProvider({ children, userId }: { children: ReactNode; use
         ...category,
         id: crypto.randomUUID(),
       }
+      await financeService.createCategory(userId, nextCategory)
       setCategories((current) => [nextCategory, ...current])
       return nextCategory
     },
     updateCategory: async (id, category) => {
       const updated = { ...category, id }
+      await financeService.updateCategory(userId, updated)
       setCategories((current) => current.map((item) => item.id === id ? updated : item))
       return updated
     },
     deleteCategory: async (id) => {
+      await financeService.deleteCategory(userId, id)
       setCategories((current) => current.filter((item) => item.id !== id))
     },
     addGoal: async (goal) => {
@@ -211,46 +242,49 @@ export function FinanceProvider({ children, userId }: { children: ReactNode; use
         ...goal,
         id: crypto.randomUUID(),
       }
+      await financeService.createGoal(userId, nextGoal)
       setGoals((current) => [nextGoal, ...current])
       return nextGoal
     },
     updateGoal: async (id, goal) => {
       const updated = { ...goal, id }
+      await financeService.updateGoal(userId, updated)
       setGoals((current) => current.map((item) => item.id === id ? updated : item))
       return updated
     },
     deleteGoal: async (id) => {
+      await financeService.deleteGoal(userId, id)
       setGoals((current) => current.filter((item) => item.id !== id))
     },
     addAccount: async (account) => {
-      const created = await financeService.createAccount(account)
+      const created = await financeService.createAccount(userId, { ...account, id: crypto.randomUUID() })
       setAccounts((current) => [created, ...current])
       return created
     },
     updateAccount: async (id, account) => {
-      const updated = await financeService.updateAccount(id, account)
+      const updated = await financeService.updateAccount(userId, { ...account, id })
       setAccounts((current) => current.map((item) => (item.id === id ? { ...item, ...updated } : item)))
       return updated
     },
     deleteAccount: async (id) => {
-      await financeService.deleteAccount(id)
+      await financeService.deleteAccount(userId, id)
       setAccounts((current) => current.filter((account) => account.id !== id))
     },
     addCreditCard: async (card) => {
-      const created = await financeService.createCreditCard(card)
+      const created = await financeService.createCreditCard(userId, { ...card, id: crypto.randomUUID() })
       setCreditCards((current) => [created, ...current])
       return created
     },
     updateCreditCard: async (id, card) => {
-      const updated = await financeService.updateCreditCard(id, card)
+      const updated = await financeService.updateCreditCard(userId, { ...card, id })
       setCreditCards((current) => current.map((item) => (item.id === id ? { ...item, ...updated } : item)))
       return updated
     },
     deleteCreditCard: async (id) => {
-      await financeService.deleteCreditCard(id)
+      await financeService.deleteCreditCard(userId, id)
       setCreditCards((current) => current.filter((card) => card.id !== id))
     },
-  }), [transactions, categories, accounts, creditCards, goals, theme, currency, language])
+  }), [transactions, categories, accounts, creditCards, goals, theme, currency, language, isLoading, loadError, userId])
 
   return <FinanceContext.Provider value={value}>{children}</FinanceContext.Provider>
 }

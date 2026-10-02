@@ -72,6 +72,7 @@ export interface Transaction {
   installmentsTotal?: number
   recurrenceParentId?: string
   installmentGroupId?: string
+  isDeleted?: boolean
 }
 
 export interface TransactionInput {

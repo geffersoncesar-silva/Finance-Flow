@@ -1427,6 +1427,29 @@ td small {
   overflow-wrap: anywhere;
 }
 
+.database-error h1 {
+  margin-bottom: 12px;
+  font-size: 1.5rem;
+}
+
+.database-error > p {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.database-error pre {
+  max-height: 140px;
+  overflow: auto;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .auth-setup > svg {
   color: var(--primary);
 }

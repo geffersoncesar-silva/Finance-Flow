@@ -4,6 +4,8 @@
 
 Authentication uses Supabase Auth with email and password. Create a Supabase project, enable email authentication, and add the local development URL (for example `http://localhost:5173/login`) to the Supabase Auth redirect allow list.
 
+Before using the finance area, open the Supabase project's SQL Editor and run [`supabase/schema.sql`](supabase/schema.sql). It creates the finance tables and enables Row Level Security policies that scope every row to `auth.uid()`.
+
 Copy `.env.example` to `.env.local`, then set:
 
 ```env
@@ -13,30 +15,22 @@ VITE_SUPABASE_ANON_KEY=your-publishable-or-anon-key
 
 Restart the Vite server after changing environment variables. `.env.local` is ignored by Git. Only use the Supabase publishable/anon key in the browser; never expose a service-role key.
 
-The app protects its routes with the Supabase session and keeps finance data in browser storage namespaced by user ID. Existing single-user local data is moved to the first account that signs in on that browser. Browser storage is not encrypted and is not protected from other users of the same browser profile. Finance data does not sync between devices; production server-side privacy requires a database schema with Row Level Security policies.
+The app protects its routes with the Supabase session and reads/writes finance records in Supabase under per-user RLS policies. Built-in categories are created for new users. Existing browser-stored records are imported once when the authenticated user's Supabase tables have no finance data; the local copy is retained as a migration/backup copy, while Supabase is the source of truth. Finance data is synchronized across devices through Supabase.
 
 ## Publish with GitHub and Vercel
 
 ### 1. Push this project to GitHub
 
-Create an empty repository on GitHub. Do not add a README or `.gitignore` there, because this project already has both. From this project folder, run:
+The local Git repository is on the `main` branch. Create an empty repository on GitHub. Do not add a README or `.gitignore` there, because this project already has both. From this project folder, run:
 
 ```powershell
-git init
 git add .
 git status --short
-```
-
-Confirm `.env.local` is not listed. Then commit and connect the new GitHub repository:
-
-```powershell
 git commit -m "Initial application"
-git branch -M main
-git remote add origin https://github.com/SEU-USUARIO/SEU-REPOSITORIO.git
 git push -u origin main
 ```
 
-Replace the remote URL with the one shown by GitHub. `.env.example` is safe to commit because the browser uses only the Supabase publishable key. Never add a Supabase secret/service-role key to `VITE_*` variables or Git.
+If the repository has no `origin` yet, add the GitHub URL first with `git remote add origin https://github.com/SEU-USUARIO/SEU-REPOSITORIO.git`. Confirm `.env.local` is not listed before committing. `.env.example` is safe to commit because the browser uses only the Supabase publishable key. Never add a Supabase secret/service-role key to `VITE_*` variables or Git.
 
 ### 2. Deploy on Vercel
 
