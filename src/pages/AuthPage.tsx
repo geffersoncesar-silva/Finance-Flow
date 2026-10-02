@@ -231,7 +231,7 @@ export function AuthPage() {
           </div>
         )}
       </section>
-      <p className="auth-footnote">{t('authPrivacyNote')}</p>
+      {/* <p className="auth-footnote">{t('authPrivacyNote')}</p> */}
     </main>
   )
 }
